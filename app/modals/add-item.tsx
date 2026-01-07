@@ -5,7 +5,7 @@ import { ItemForm, ItemFormValues } from "@/components/items/ItemForm";
 import { Screen } from "@/components/ui/Screen";
 import { Body, Title } from "@/components/ui/Typography";
 import { supabase } from "@/lib/supabase";
-import { uploadWardrobeImageFromBase64 } from "@/lib/upload";
+import { uploadWardrobeImage } from "@/lib/upload";
 
 export default function AddItemModal() {
   async function onSubmit(values: ItemFormValues) {
@@ -22,13 +22,10 @@ export default function AddItemModal() {
 
     // Cover image is first
     const cover = values.images[0];
-    if (!cover.base64) {
-      throw new Error("Selected image has no base64 data. Try picking it again.");
-    }
 
-    const uploadedCover = await uploadWardrobeImageFromBase64({
+    const uploadedCover = await uploadWardrobeImage({
       base64: cover.base64,
-      uriHint: cover.uri,
+      uri: cover.uri,
       userId: user.id,
     });
 
