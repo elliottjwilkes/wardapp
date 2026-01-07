@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { Screen } from "@/components/ui/Screen";
 import { Body, Title } from "@/components/ui/Typography";
 import { supabase } from "@/lib/supabase";
-import { uploadWardrobeImageFromBase64 } from "@/lib/upload"; // <- make sure this exists (see note below)
+import { uploadWardrobeImage } from "@/lib/upload";
 type ItemRow = {
   id: string;
   user_id: string;
@@ -86,15 +86,15 @@ export default function ItemDetails() {
 
     if (userErr || !user) throw userErr || new Error("Not signed in");
 
-    // Upload only NEW images (ones that have base64)
-    const newOnes = values.images.filter((img) => !!img.base64);
+    // Upload only NEW images (local URIs, not signed URLs)
+    const newOnes = values.images.filter((img) => !img.uri.startsWith("http"));
 
     let newCoverPath: string | null = null;
 
     if (newOnes.length > 0) {
-      const uploaded = await uploadWardrobeImageFromBase64({
-        base64: newOnes[0].base64!, // safe because filtered
-        uriHint: newOnes[0].uri,
+      const uploaded = await uploadWardrobeImage({
+        base64: newOnes[0].base64,
+        uri: newOnes[0].uri,
         userId: user.id,
       });
 

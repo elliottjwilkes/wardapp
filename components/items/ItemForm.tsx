@@ -49,14 +49,16 @@ export function ItemForm(props: {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.9,
       base64: true,
+      allowsMultipleSelection: true,
+      selectionLimit: 0,
     });
 
     if (!result.canceled) {
-      const a = result.assets[0];
-      setImages((prev) => [
-        ...prev,
-        { uri: a.uri, base64: a.base64 ?? undefined },
-      ]);
+      const next = result.assets.map((asset) => ({
+        uri: asset.uri,
+        base64: asset.base64 ?? undefined,
+      }));
+      setImages((prev) => [...prev, ...next]);
     }
   }
 
