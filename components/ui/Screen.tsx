@@ -1,5 +1,5 @@
 import { View, type ViewProps } from "react-native";
-import { theme } from "../../lib/theme.ts";
+import { theme } from "../../lib/theme";
 
 type ScreenProps = ViewProps & {
   padded?: boolean;

@@ -1,6 +1,6 @@
 import { decode } from "base64-arraybuffer";
 import * as Crypto from "expo-crypto";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import { supabase } from "./supabase";
 
 function guessContentType(ext: string) {
@@ -13,6 +13,12 @@ function guessContentType(ext: string) {
 
 async function resolveBase64(base64: string | undefined, uri: string) {
   if (base64) return base64;
+
+  // fallback only works for file:// URIs
+  if (!uri.startsWith("file://")) {
+    throw new Error("No base64 provided and uri is not a file:// path");
+  }
+
   return FileSystem.readAsStringAsync(uri, {
     encoding: FileSystem.EncodingType.Base64,
   });
@@ -20,7 +26,7 @@ async function resolveBase64(base64: string | undefined, uri: string) {
 
 export async function uploadWardrobeImage(params: {
   base64?: string;
-  uri: string;
+  uri: string;     // local uri (file:// or ph://) OR just used for ext hint
   userId: string;
 }) {
   const { base64, uri, userId } = params;

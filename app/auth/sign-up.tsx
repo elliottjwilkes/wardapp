@@ -65,7 +65,7 @@ export default function SignUp() {
 
         <Text style={{ marginTop: 18, textAlign: "center", color: "#777" }}>
           Already have an account?{" "}
-          <Text style={{ color: "#111", fontWeight: "600" }} onPress={() => router.back()}>
+          <Text style={{ color: "#111", fontWeight: "600" }} onPress={() => router.replace("/auth/sign-in")}>
             Sign in
           </Text>
         </Text>

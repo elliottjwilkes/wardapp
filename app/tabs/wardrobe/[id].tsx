@@ -8,6 +8,7 @@ import { Screen } from "@/components/ui/Screen";
 import { Body, Title } from "@/components/ui/Typography";
 import { supabase } from "@/lib/supabase";
 import { uploadWardrobeImage } from "@/lib/upload";
+
 type ItemRow = {
   id: string;
   user_id: string;
@@ -28,22 +29,23 @@ export default function ItemDetails() {
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const [item, setItem] = useState<ItemRow | null>(null);
-  const [coverUrl, setCoverUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [photoUrls, setPhotoUrls] = useState<string[]>([]);
 
   async function load() {
     if (!id) return;
 
     setLoading(true);
+
+    // 1) Load the item row
     const { data, error } = await supabase
       .from("items")
       .select("id,user_id,image_path,type,color,brand,created_at")
       .eq("id", id)
       .single();
 
-    setLoading(false);
-
     if (error) {
+      setLoading(false);
       Alert.alert("Error loading item", error.message);
       return;
     }
@@ -51,22 +53,39 @@ export default function ItemDetails() {
     const row = data as ItemRow;
     setItem(row);
 
-    try {
-      const signed = await getSignedImageUrl(row.image_path);
-      setCoverUrl(signed);
-    } catch {
-      setCoverUrl(null);
+    // 2) Load item_photos for this item
+    const { data: photos, error: photosErr } = await supabase
+      .from("item_photos")
+      .select("image_path, sort_order")
+      .eq("item_id", row.id)
+      .order("sort_order");
+
+    if (photosErr) {
+      console.log("photos load error", photosErr);
+      setPhotoUrls([]);
+    } else {
+      try {
+        const signedUrls = await Promise.all((photos ?? []).map((p) => getSignedImageUrl(p.image_path)));
+        setPhotoUrls(signedUrls);
+      } catch (e: any) {
+        console.log("sign url error", e?.message ?? e);
+        setPhotoUrls([]);
+      }
     }
+
+    setLoading(false);
   }
 
   useEffect(() => {
     load();
   }, [id]);
 
+  // ✅ Use photoUrls (all photos), not coverUrl
   const initialValues = useMemo(() => {
     if (!item) return undefined;
 
-    const images: PickedImage[] = coverUrl ? [{ uri: coverUrl }] : [];
+    const images: PickedImage[] =
+      photoUrls.length > 0 ? photoUrls.map((uri) => ({ uri })) : [];
 
     return {
       images,
@@ -74,7 +93,7 @@ export default function ItemDetails() {
       color: item.color ?? "",
       brand: item.brand ?? "",
     };
-  }, [item, coverUrl]);
+  }, [item, photoUrls]);
 
   async function onSubmit(values: ItemFormValues) {
     if (!item) return;
@@ -86,31 +105,59 @@ export default function ItemDetails() {
 
     if (userErr || !user) throw userErr || new Error("Not signed in");
 
-    // Upload only NEW images (local URIs, not signed URLs)
-    const newOnes = values.images.filter((img) => !img.uri.startsWith("http"));
+    // NEW images are those with base64 (picked just now)
+    const newOnes = values.images.filter((img) => !!img.base64);
 
-    let newCoverPath: string | null = null;
-
-    if (newOnes.length > 0) {
+    // Upload new images
+    const newPaths: string[] = [];
+    for (const img of newOnes) {
+      if (!img.base64) continue;
       const uploaded = await uploadWardrobeImage({
-        base64: newOnes[0].base64,
-        uri: newOnes[0].uri,
+        base64: img.base64,
+        uri: img.uri,
         userId: user.id,
       });
-
-      newCoverPath = uploaded.path;
-
-      // Later: upload remaining photos into item_photos table
-      // for (const img of newOnes.slice(1)) { ... }
+      newPaths.push(uploaded.path);
     }
 
+    // If new images were added, append them to item_photos
+    if (newPaths.length > 0) {
+      // find next sort_order
+      const { data: existing } = await supabase
+        .from("item_photos")
+        .select("sort_order")
+        .eq("item_id", item.id)
+        .order("sort_order", { ascending: false })
+        .limit(1);
+
+      const startOrder = existing?.[0]?.sort_order ?? -1;
+
+      const rows = newPaths.map((path, idx) => ({
+        item_id: item.id,
+        image_path: path,
+        sort_order: startOrder + 1 + idx,
+      }));
+
+      const { error: photosErr } = await supabase.from("item_photos").insert(rows);
+      if (photosErr) throw photosErr;
+
+      // also set cover to the first image if there wasn't one, OR if you want "latest becomes cover"
+      // Here: if user added new images, we set cover to the first new one
+      const { error: coverErr } = await supabase
+        .from("items")
+        .update({ image_path: newPaths[0] })
+        .eq("id", item.id);
+
+      if (coverErr) throw coverErr;
+    }
+
+    // Update metadata
     const { error: updateErr } = await supabase
       .from("items")
       .update({
         type: values.type,
         color: values.color || null,
         brand: values.brand || null,
-        ...(newCoverPath ? { image_path: newCoverPath } : {}),
       })
       .eq("id", item.id);
 
@@ -137,36 +184,34 @@ export default function ItemDetails() {
   }
 
   return (
-    <>
-      <Screen>
-  <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
-    <Title>Edit item</Title>
-    <Body style={{ marginTop: 8 }}>
-      {loading ? "Loading..." : "Update photo and metadata."}
-    </Body>
+    <Screen>
+      <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
+        <Title>Edit item</Title>
+        <Body style={{ marginTop: 8 }}>
+          {loading ? "Loading..." : "Update photos and metadata."}
+        </Body>
 
-    {item && initialValues ? (
-      <ItemForm
-        initialValues={initialValues}
-        submitLabel="Save changes"
-        onSubmit={async (v) => {
-          try {
-            await onSubmit(v);
-          } catch (e: any) {
-            Alert.alert("Save failed", e?.message ?? "Unknown error");
-          }
-        }}
-      />
-    ) : null}
+        {item && initialValues ? (
+          <ItemForm
+            initialValues={initialValues}
+            submitLabel="Save changes"
+            onDiscard={() => router.back()}
+            onSubmit={async (v) => {
+              try {
+                await onSubmit(v);
+              } catch (e: any) {
+                Alert.alert("Save failed", e?.message ?? "Unknown error");
+              }
+            }}
+          />
+        ) : null}
 
-    {item ? (
-      <View style={{ marginTop: 14 }}>
-        <Button label="Delete item" onPress={deleteItem} />
-      </View>
-    ) : null}
-  </ScrollView>
-</Screen>
-
-    </>
+        {item ? (
+          <View style={{ marginTop: 14 }}>
+            <Button label="Delete item" onPress={deleteItem} />
+          </View>
+        ) : null}
+      </ScrollView>
+    </Screen>
   );
 }

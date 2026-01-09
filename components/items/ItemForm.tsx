@@ -1,5 +1,5 @@
 import * as ImagePicker from "expo-image-picker";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Alert, Image, Text, TextInput, View } from "react-native";
 
 import { Button } from "@/components/ui/Button";
@@ -22,6 +22,7 @@ export function ItemForm(props: {
   initialValues?: Partial<ItemFormValues>;
   submitLabel: string;
   onSubmit: (values: ItemFormValues) => Promise<void>;
+  onDiscard?: () => void;
 }) {
   const [images, setImages] = useState<PickedImage[]>(props.initialValues?.images ?? []);
   const [type, setType] = useState<ItemType>(props.initialValues?.type ?? "Top");
@@ -29,7 +30,6 @@ export function ItemForm(props: {
   const [brand, setBrand] = useState(props.initialValues?.brand ?? "");
   const [saving, setSaving] = useState(false);
 
-  // Sync when initialValues load/change (important for edit screen)
   useEffect(() => {
     if (!props.initialValues) return;
     if (props.initialValues.images !== undefined) setImages(props.initialValues.images ?? []);
@@ -37,6 +37,38 @@ export function ItemForm(props: {
     if (props.initialValues.color !== undefined) setColor(props.initialValues.color);
     if (props.initialValues.brand !== undefined) setBrand(props.initialValues.brand);
   }, [props.initialValues]);
+
+  function norm(v?: Partial<ItemFormValues>) {
+    return {
+      images: v?.images?.map((i) => i.uri) ?? [],
+      type: v?.type ?? "Top",
+      color: v?.color ?? "",
+      brand: v?.brand ?? "",
+    };
+  }
+
+  const initialNorm = useMemo(() => norm(props.initialValues), [props.initialValues]);
+  const currentNorm = useMemo(
+    () => ({
+      images: images.map((i) => i.uri),
+      type,
+      color,
+      brand,
+    }),
+    [images, type, color, brand]
+  );
+
+  const isDirty = useMemo(() => {
+    if (initialNorm.type !== currentNorm.type) return true;
+    if (initialNorm.color !== currentNorm.color) return true;
+    if (initialNorm.brand !== currentNorm.brand) return true;
+
+    if (initialNorm.images.length !== currentNorm.images.length) return true;
+    for (let i = 0; i < initialNorm.images.length; i++) {
+      if (initialNorm.images[i] !== currentNorm.images[i]) return true;
+    }
+    return false;
+  }, [initialNorm, currentNorm]);
 
   async function pickImage() {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -63,28 +95,35 @@ export function ItemForm(props: {
   }
 
   async function submit() {
-    if (images.length === 0) {
-      return Alert.alert("Missing photo", "Pick at least one photo.");
-    }
+    if (images.length === 0) return Alert.alert("Missing photo", "Pick at least one photo.");
 
     setSaving(true);
     try {
-      await props.onSubmit({
-        images,
-        type,
-        color,
-        brand,
-      });
+      await props.onSubmit({ images, type, color, brand });
     } finally {
       setSaving(false);
     }
+  }
+
+  function discard() {
+    if (!props.onDiscard) return;
+
+    if (!isDirty) {
+      props.onDiscard();
+      return;
+    }
+
+    Alert.alert("Discard changes?", "Your unsaved changes will be lost.", [
+      { text: "Keep editing", style: "cancel" },
+      { text: "Discard", style: "destructive", onPress: props.onDiscard },
+    ]);
   }
 
   return (
     <>
       {/* Photos */}
       <View style={{ marginTop: 18 }}>
-        <Button label={images.length > 0 ? "Add another photo" : "Pick photo"} onPress={pickImage} />
+        <Button label={images.length > 0 ? "Add more photos" : "Pick photos"} onPress={pickImage} />
 
         {images.length === 0 ? (
           <View
@@ -102,13 +141,13 @@ export function ItemForm(props: {
             <Body style={{ color: theme.colors.textTertiary }}>No photos yet</Body>
           </View>
         ) : (
-          <View style={{ marginTop: 12, flexDirection: "row", gap: 10 }}>
+          <View style={{ marginTop: 12, flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
             {images.map((img, idx) => (
               <Image
                 key={`${img.uri}-${idx}`}
                 source={{ uri: img.uri }}
                 style={{
-                  width: idx === 0 ? 180 : 120, // first = cover
+                  width: idx === 0 ? 180 : 120,
                   height: 180,
                   borderRadius: theme.radius.lg,
                   backgroundColor: theme.colors.surface,
@@ -179,9 +218,17 @@ export function ItemForm(props: {
         />
       </View>
 
-      {/* Save */}
-      <View style={{ marginTop: 18 }}>
-        <Button label={saving ? "Saving..." : props.submitLabel} onPress={submit} disabled={saving} />
+      {/* Save + Discard */}
+      <View style={{ marginTop: 18, flexDirection: "row", gap: 10 }}>
+        {props.onDiscard ? (
+          <View style={{ flex: 1 }}>
+            <Button label="Discard" onPress={discard} disabled={saving} />
+          </View>
+        ) : null}
+
+        <View style={{ flex: 1 }}>
+          <Button label={saving ? "Saving..." : props.submitLabel} onPress={submit} disabled={saving} />
+        </View>
       </View>
     </>
   );
